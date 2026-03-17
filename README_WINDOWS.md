@@ -37,6 +37,42 @@ cd ..
 ```
 
 
+## Building Without MSYS2 (Custom Qt/MinGW Setup)
+
+If you already have Qt6 and MinGW installed via the [Qt Online Installer](https://www.qt.io/download-qt-installer) or another custom setup, you can build **wxqt** without MSYS2.
+
+### Prerequisites
+* Qt6 (including `qmake`) installed to a known path, e.g. `C:\Qt\6.x.x\mingw_64`
+* MinGW-w64 toolchain (bundled with Qt or installed separately), with `mingw32-make.exe` on your `PATH`
+* `git` for Windows ([https://git-scm.com/](https://git-scm.com/))
+* Python 3 for Windows ([https://www.python.org/](https://www.python.org/))
+
+### Build Steps
+
+1. Clone the repository and generate resources:
+```bat
+git clone https://gitlab.com/joshua.tee/wxqt
+cd wxqt\resourceCreation
+python createResourcesImage.py
+python createResourcesRes.py
+cd ..
+```
+
+2. Regenerate the `Makefile` using **your** qmake so that all tool paths reflect your installation:
+```bat
+C:\Qt\6.x.x\mingw_64\bin\qmake6.exe -o Makefile wxqt.pro
+```
+Replace `C:\Qt\6.x.x\mingw_64` with the actual path to your Qt kit.
+
+3. Build the project:
+```bat
+mingw32-make -f Makefile release
+```
+
+The compiled binary will be placed under `build\release\`.
+
+> **Note:** The `Makefile` checked into the repository has MSYS2 paths hard-coded (e.g. `d:\msys64\mingw64\bin\`). Always regenerate it with `qmake` from **your own** Qt installation before building to avoid path mismatches.
+
 ## Additional Reference Links
 * [MSYS2 Detailed install guide](https://www.msys2.org/wiki/MSYS2-installation/)
 * [MSYS2 Introduction](https://www.msys2.org/wiki/MSYS2-introduction/)
