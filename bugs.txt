@@ -1,0 +1,238 @@
+================================================================================
+wxqt Windows Bug Fixes
+================================================================================
+Build environment: Qt 6.4.2 (mingw_64) + Strawberry Perl MinGW 13.2.0 (UCRT)
+All bugs found and fixed during first Windows build/run session (2026-03-17).
+GitHub issues: https://github.com/rcg4u/wxqt/issues
+================================================================================
+
+
+BUG #1 — CountyLabels crash on startup (std::length_error)
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/1
+Fixed in commit: bc93d9e
+File: src/radar/CountyLabels.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  App crashes immediately on startup with "terminate called after throwing an
+  instance of 'std::length_error'" before the main window appears.
+
+ROOT CAUSE:
+  gaz_counties_national.txt ends with a trailing newline.
+  WString::split(text, "\n") produces a final empty string element.
+  WString::split("", ",") returns a 1-element vector [""].
+  items[1], items[2], items[3] are then out-of-bounds — undefined behaviour.
+  On Windows debug heap the garbage pointer (0xabababababababab) is used to
+  construct a std::string, triggering std::length_error.
+
+  Note: CitiesExtended.cpp and Metar.cpp (line ~187) already had this guard;
+  CountyLabels.cpp did not.
+
+GDB BACKTRACE:
+  #0  std::__cxx11::basic_string::_M_create (this=...)
+  #1  CountyLabels::create () at src/radar/CountyLabels.cpp:24
+        names.push_back(items[1]);   <-- items[1] is 0xababab... garbage
+
+FIX:
+  --- src/radar/CountyLabels.cpp
+  +++ src/radar/CountyLabels.cpp
+  @@ -22,7 +22,9 @@ void CountyLabels::create() {
+       for (const auto& line : lines) {
+           const auto items = WString::split(line, ",");
+  -        names.push_back(items[1]);
+  -        location.emplace_back(To::Double(items[2]), -1.0f * To::Double(items[3]));
+  +        if (items.size() > 3) {
+  +            names.push_back(items[1]);
+  +            location.emplace_back(To::Double(items[2]), -1.0f * To::Double(items[3]));
+  +        }
+       }
+
+
+--------------------------------------------------------------------------------
+BUG #2 — Metar.cpp latent OOB in obsLatlon population
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/2
+Fixed in commit: bc93d9e
+File: src/radar/Metar.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  Latent undefined behaviour — no crash observed but could silently corrupt
+  the obsLatlon map or crash on bad resource file lines.
+
+ROOT CAUSE:
+  Same pattern as Bug #1. At line ~46, obsLatlon is populated by splitting
+  lines from the METAR stations resource file on ",". If a line is empty or
+  has fewer than 3 fields (e.g. trailing newline), items[1] and items[2]
+  are out-of-bounds. The guard was present at line ~187 for metarSites but
+  missing at line ~46 for obsLatlon.
+
+FIX:
+  --- src/radar/Metar.cpp
+  @@ ~line 44
+  -    obsLatlon[items[0]] = LatLon{items[1], items[2]};
+  +    if (items.size() > 2) {
+  +        obsLatlon[items[0]] = LatLon{items[1], items[2]};
+  +    }
+
+
+--------------------------------------------------------------------------------
+BUG #3 — NexradWidget crash on startup (SIGSEGV in setRadar)
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/3
+Fixed in commit: bc93d9e
+File: src/ui/MainWindow.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  When NEXRAD_ON_MAIN_SCREEN preference is "true", the app crashes on
+  startup with SIGSEGV inside NexradState::setRadar(), trying to write
+  to radarSite._M_p = 0xbaadf00dbaadf00d (invalid pointer).
+
+ROOT CAUSE:
+  Two bugs combine:
+
+  1. tokenString is never updated after addWidgets() runs, so
+     configChangeCheck() always considers the layout stale and calls
+     addWidgets() on every reload() invocation.
+
+  2. UtilityUI::removeChildren() calls widget->deleteLater() on every
+     widget in the layout — including nexradList[0] (the NexradWidget).
+
+  Sequence:
+    a. Constructor line 80:  addWidgets() — adds nexradList[0] to imageLayout
+    b. Constructor line 117: reload()
+       → configChangeCheck() [tokenString="" != computeTokenString()]
+       → addWidgets() again
+         → imageLayout.removeChildren()
+           → nexradList[0]->deleteLater()   ← schedules deletion
+         → imageLayout.addWidget(nexradList[0])  ← re-adds dead pointer
+    c. reload() line 188: nexradList[0]->nexradState.setRadar(...)
+       → object partially destroyed → SIGSEGV
+
+GDB BACKTRACE:
+  SIGSEGV in ucrtbase!memmove
+  #1  std::char_traits<char>::copy (__s1=0xbaadf00dbaadf00d, __s2="TLX")
+  #3  std::string::_M_assign (this=0x48c7570, __str="TLX")
+  #6  NexradState::setRadar (this=0x48c7408) at NexradState.cpp:52
+  #7  MainWindow::reload (this=0x5ff2a0) at MainWindow.cpp:188
+  #8  MainWindow::MainWindow at MainWindow.cpp:117
+
+FIX:
+  Two changes to MainWindow::addWidgets():
+
+  1. Detach NexradWidget BEFORE clearing the layout:
+     --- src/ui/MainWindow.cpp  (top of addWidgets)
+     +    if (UIPreferences::nexradMainScreen && !nexradList.empty()) {
+     +        imageLayout.getView()->removeWidget(nexradList[0]);
+     +    }
+          imageLayout.removeChildren();
+
+  2. Update tokenString/imageSize at END of addWidgets() so the
+     change-check doesn't always fire:
+     --- src/ui/MainWindow.cpp  (end of addWidgets)
+     +    tokenString = computeTokenString();
+     +    imageSize = UIPreferences::mainScreenImageSize;
+
+  Also added !nexradList.empty() safety check on the addWidget call:
+     -    if (UIPreferences::nexradMainScreen) {
+     +    if (UIPreferences::nexradMainScreen && !nexradList.empty()) {
+
+
+--------------------------------------------------------------------------------
+BUG #4 — LocationEditBox crash when typing a city with no matches
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/4
+Fixed in commit: ccb4213
+File: src/settings/LocationEditBox.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  App crashes with SIGSEGV when the user opens Settings > Locations, then
+  types 3 or more characters in the city search box that match no city.
+  Also crashes if any line in cityall.txt has fewer than 3 CSV fields.
+
+ROOT CAUSE:
+  In lookupSearchTerm(), after building citiesSelected, a loop over buttons
+  always calls populateLabels(0) when index == 0, regardless of whether
+  any matches were found:
+
+      if (index == 0) {
+          populateLabels(index);   // ALWAYS fires — BUG
+      }
+
+  When citiesSelected is empty, buttons[0] still holds "" (from
+  blankOutButtons()). populateLabels reads buttons[0].getText() → "",
+  calls WString::split("", ",") → [""] (1 element), then accesses
+  tokens[1] → out-of-bounds → SIGSEGV.
+
+  Additionally, getNearestRadarSites()[0] was accessed without checking
+  whether the vector is non-empty.
+
+GDB BACKTRACE (inferred from Qt signal frames):
+  QLineEdit::keyPressEvent
+  → QLineEdit textChanged signal
+  → lambda [this] { lookupSearchTerm(); }
+  → populateLabels(0)
+  → WString::split("", ",")[1]  (OOB)
+
+FIX:
+  --- src/settings/LocationEditBox.cpp  lookupSearchTerm()
+       for (auto& city : cities) {
+           if (WString::startsWith(WString::toLower(city), text)) {
+               const auto tokens = WString::split(city, ",");
+  -            const auto latLon = LatLon{tokens[1], tokens[2]};
+  -            const auto radar = UtilityLocation::getNearestRadarSites(latLon,1,false)[0].name;
+  -            citiesSelected.push_back(city + " Radar: " + radar);
+  +            if (tokens.size() >= 3) {
+  +                const auto latLon = LatLon{tokens[1], tokens[2]};
+  +                const auto radarSites = UtilityLocation::getNearestRadarSites(latLon,1,false);
+  +                if (!radarSites.empty()) {
+  +                    citiesSelected.push_back(city + " Radar: " + radarSites[0].name);
+  +                }
+  +            }
+           }
+       }
+       for (size_t index : range(buttons.size())) {
+           if (index < citiesSelected.size()) { ... }
+  -        if (index == 0) {
+  +        if (index == 0 && !citiesSelected.empty()) {
+               populateLabels(index);
+           }
+       }
+
+  --- src/settings/LocationEditBox.cpp  populateLabels()
+       const auto tokens = WString::split(city, ",");
+  -    const auto latLon = LatLon{tokens[1], tokens[2]};
+  -    const auto radar = UtilityLocation::getNearestRadarSites(latLon,1,false)[0].name;
+  -    editName.setText(tokens[0]);
+  -    editLat.setText(tokens[1]);
+  -    editLon.setText(tokens[2]);
+  -    editNexrad.setText(radar);
+  +    if (tokens.size() >= 3) {
+  +        const auto latLon = LatLon{tokens[1], tokens[2]};
+  +        const auto radarSites = UtilityLocation::getNearestRadarSites(latLon,1,false);
+  +        editName.setText(tokens[0]);
+  +        editLat.setText(tokens[1]);
+  +        editLon.setText(tokens[2]);
+  +        if (!radarSites.empty()) {
+  +            editNexrad.setText(radarSites[0].name);
+  +        }
+  +    }
+
+
+================================================================================
+GENERAL PATTERN
+================================================================================
+All four bugs share a common root cause: WString::split() can return a
+vector with fewer elements than expected (e.g. when splitting an empty
+string or a line that lacks delimiters), and the code accessed indices
+without checking the vector size first.
+
+The recurring fix pattern is:
+  1. Store the split result in a named variable.
+  2. Check .size() >= N before accessing index N-1.
+  3. For functions that return vectors (getNearestRadarSites etc.),
+     check !result.empty() before accessing result[0].
+
+Already-guarded examples in the codebase to follow:
+  - src/radar/CitiesExtended.cpp  (items.size() > 3 guard)
+  - src/radar/Metar.cpp line ~187 (items.size() > 3 guard for metarSites)
+================================================================================
