@@ -219,8 +219,8 @@ FIX:
 
 
 BUG #5 — RadarSites map incomplete: getNearestRadarSites crashes on missing sites
-GitHub Issue: (pending)
-Fixed in commit: (pending)
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/5
+Fixed in commit: 7033695
 File: src/settings/UtilityLocation.cpp
 --------------------------------------------------------------------------------
 
@@ -282,10 +282,41 @@ DIFF:
       Similar .find() guards with safe fallback returns.
 
 
+BUG #6 — WfoSites map incomplete: getNearestOffice crashes when saving location
+GitHub Issue: (pending)
+Fixed in commit: (pending)
+File: src/settings/UtilityLocation.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  App crashes when clicking Save on a location that has no NWS API response
+  (so code falls back to getNearestOffice("WFO", ...)). Observed while saving
+  "Lake Sarasota".
+  GDB backtrace:
+    #0  ucrtbase!abort
+    #6  std::unordered_map::at (key="HDC") → std::out_of_range
+    #8  UtilityLocation::getWfoSiteLatLon (wfo="HDC")
+    #9  UtilityLocation::getNearestOffice (officeType="WFO")
+    #10 Location::save
+    #11 LocationEditBox::saveLocation
+
+ROOT CAUSE:
+  Same pattern as Bug #5 — GlobalArrays::wfos contains WFO IDs that are
+  absent from WfoSites::wfoSiteToLat/wfoSiteToLon. "HDC" is one such ID.
+  getNearestOffice() WFO branch called getWfoSiteLatLon() which used
+  WfoSites::wfoSiteToLat.at(wfo) — throws std::out_of_range for missing keys.
+  getSoundingSiteLatLon() had the same unsafe .at() pattern.
+
+FIX (src/settings/UtilityLocation.cpp):
+  - getNearestOffice() (WFO branch): skip WFOs absent from wfoSiteToLat.
+  - getWfoSiteLatLon(): use .find(); return LatLon{} if key missing.
+  - getSoundingSiteLatLon(): use .find(); return LatLon{} if key missing.
+
+
 ================================================================================
 GENERAL PATTERN
 ================================================================================
-All five bugs share common root causes on Windows:
+All six bugs share common root causes on Windows:
 
 1. WString::split() returns fewer elements than expected (e.g. empty string
    or line without delimiters) → always check .size() before indexing.

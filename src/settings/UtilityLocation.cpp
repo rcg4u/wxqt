@@ -76,6 +76,9 @@ string UtilityLocation::getNearestOffice(const string& officeType, const LatLon&
     for (const auto& office : officeArray) {
         const auto labelArr = WString::split(office, ":");
         if (officeType == "WFO") {
+            if (WfoSites::wfoSiteToLat.find(labelArr[0]) == WfoSites::wfoSiteToLat.end()) {
+                continue;
+            }
             auto latLon = getWfoSiteLatLon(labelArr[0]);
             sites.emplace_back(labelArr[0], latLon, location.dist(latLon));
         } else {
@@ -135,11 +138,21 @@ string UtilityLocation::getRadarSiteY(const string& radarSite) {
 }
 
 LatLon UtilityLocation::getWfoSiteLatLon(const string& wfo) {
-    return {WfoSites::wfoSiteToLat.at(wfo), WfoSites::wfoSiteToLon.at(wfo)};
+    const auto itLat = WfoSites::wfoSiteToLat.find(wfo);
+    const auto itLon = WfoSites::wfoSiteToLon.find(wfo);
+    if (itLat == WfoSites::wfoSiteToLat.end() || itLon == WfoSites::wfoSiteToLon.end()) {
+        return {};
+    }
+    return {itLat->second, itLon->second};
 }
 
 LatLon UtilityLocation::getSoundingSiteLatLon(const string& wfo) {
-    return {SoundingSites::soundingSiteToLat.at(wfo), "-" + SoundingSites::soundingSiteToLon.at(wfo)};
+    const auto itLat = SoundingSites::soundingSiteToLat.find(wfo);
+    const auto itLon = SoundingSites::soundingSiteToLon.find(wfo);
+    if (itLat == SoundingSites::soundingSiteToLat.end() || itLon == SoundingSites::soundingSiteToLon.end()) {
+        return {};
+    }
+    return {itLat->second, "-" + itLon->second};
 }
 
 string UtilityLocation::getNearest(const LatLon& latLon, const unordered_map<string, LatLon>& sectorToLatLon) {
