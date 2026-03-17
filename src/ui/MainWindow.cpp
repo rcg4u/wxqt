@@ -251,6 +251,10 @@ void MainWindow::configChangeCheck() {
 }
 
 void MainWindow::addWidgets() {
+    // Remove nexrad widget from layout before clearing to prevent it being scheduled for deletion
+    if (UIPreferences::nexradMainScreen && !nexradList.empty()) {
+        imageLayout.getView()->removeWidget(nexradList[0]);
+    }
     imageLayout.removeChildren();
     rightMostLayout.removeChildren();
     imageWidgets.clear();
@@ -259,7 +263,7 @@ void MainWindow::addWidgets() {
     //
     // TEST - put nexrad at top
     //
-    if (UIPreferences::nexradMainScreen) {
+    if (UIPreferences::nexradMainScreen && !nexradList.empty()) {
         nexradList[0]->setFixedHeight(UIPreferences::mainScreenImageSize);
         nexradList[0]->setFixedWidth(UIPreferences::mainScreenImageSize);
         imageLayout.addWidget(nexradList[0]);
@@ -291,6 +295,8 @@ void MainWindow::addWidgets() {
             rightMostLayout.addWidget(textWidgets[item.prefToken]);
         }
     }
+    tokenString = computeTokenString();
+    imageSize = UIPreferences::mainScreenImageSize;
 }
 
 string MainWindow::computeTokenString() {

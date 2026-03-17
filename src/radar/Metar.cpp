@@ -43,7 +43,9 @@ void Metar::getStateMetarArrayForWXOGL(const string& radarSite, FileStorage& fil
             const auto lines = UtilityIO::rawFileToStringArray(GlobalVariables::resDir + metarFileName);
             for (const auto& line : lines) {
                 const auto items = WString::split(line, " ");
-                obsLatlon[items[0]] = LatLon{items[1], items[2]};
+                if (items.size() > 2) {
+                    obsLatlon[items[0]] = LatLon{items[1], items[2]};
+                }
             }
             initializedObsMap = true;
         }

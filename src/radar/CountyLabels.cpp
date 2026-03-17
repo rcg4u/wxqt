@@ -21,8 +21,10 @@ void CountyLabels::create() {
         const auto lines = WString::split(text, GlobalVariables::newline);
         for (const auto& line : lines) {
             const auto items = WString::split(line, ",");
-            names.push_back(items[1]);
-            location.emplace_back(To::Double(items[2]), -1.0f * To::Double(items[3]));
+            if (items.size() > 3) {
+                names.push_back(items[1]);
+                location.emplace_back(To::Double(items[2]), -1.0f * To::Double(items[3]));
+            }
         }
     }
 }
