@@ -37,12 +37,20 @@ vector<RID> UtilityLocation::getNearestRadarSites(const LatLon& latLon, int coun
     vector<RID> radarSites;
     for (const auto& radar : GlobalArrays::nexradRadars) {
         const auto labels = WString::split(radar, ":");
-        radarSites.emplace_back(labels[0], getSiteLocation(labels[0], OfficeTypeEnum::RadarSite), latLon.dist(getSiteLocation(labels[0], OfficeTypeEnum::RadarSite)));
+        if (RadarSites::radarSiteToLat.find(labels[0]) == RadarSites::radarSiteToLat.end()) {
+            continue;
+        }
+        const auto siteLatLon = getSiteLocation(labels[0], OfficeTypeEnum::RadarSite);
+        radarSites.emplace_back(labels[0], siteLatLon, latLon.dist(siteLatLon));
     }
     if (includeTdwr) {
         for (const auto& radar : GlobalArrays::tdwrRadars) {
             const auto labels = WString::split(radar, ":");
-            radarSites.emplace_back(labels[0], getSiteLocation(labels[0], OfficeTypeEnum::RadarSite), latLon.dist(getSiteLocation(labels[0], OfficeTypeEnum::RadarSite)));
+            if (RadarSites::radarSiteToLat.find(labels[0]) == RadarSites::radarSiteToLat.end()) {
+                continue;
+            }
+            const auto siteLatLon = getSiteLocation(labels[0], OfficeTypeEnum::RadarSite);
+            radarSites.emplace_back(labels[0], siteLatLon, latLon.dist(siteLatLon));
         }
     }
     std::sort(
@@ -53,7 +61,8 @@ vector<RID> UtilityLocation::getNearestRadarSites(const LatLon& latLon, int coun
     // If length is -1 (the default), all elements after pos are included; otherwise length elements (or all remaining
     // elements if there are less than length elements) are included. https://doc.qt.io/qt-5/qvector.html#mid
     // return radarSites.mid(0, cnt);
-    return {radarSites.begin(), radarSites.begin() + count};
+    const auto available = static_cast<int>(radarSites.size());
+    return {radarSites.begin(), radarSites.begin() + std::min(count, available)};
 }
 
 string UtilityLocation::getNearestOffice(const string& officeType, const LatLon& location) {
@@ -70,9 +79,15 @@ string UtilityLocation::getNearestOffice(const string& officeType, const LatLon&
             auto latLon = getWfoSiteLatLon(labelArr[0]);
             sites.emplace_back(labelArr[0], latLon, location.dist(latLon));
         } else {
+            if (RadarSites::radarSiteToLat.find(labelArr[0]) == RadarSites::radarSiteToLat.end()) {
+                continue;
+            }
             auto latLon = getRadarSiteLatLon(labelArr[0]);
             sites.emplace_back(labelArr[0], latLon, location.dist(latLon));
         }
+    }
+    if (sites.empty()) {
+        return "";
     }
     std::sort(
         sites.begin(),
@@ -96,19 +111,27 @@ LatLon UtilityLocation::getCenterOfPolygon(const vector<LatLon>& latLons) {
 }
 
 string UtilityLocation::getRadarSiteName(const string& radarSite) {
-    return RadarSites::radarIdToName.at(radarSite);
+    const auto it = RadarSites::radarIdToName.find(radarSite);
+    return (it != RadarSites::radarIdToName.end()) ? it->second : radarSite;
 }
 
 LatLon UtilityLocation::getRadarSiteLatLon(const string& radarSite) {
-    return {RadarSites::radarSiteToLat.at(radarSite), "-" + RadarSites::radarSiteToLon.at(radarSite)};
+    const auto itLat = RadarSites::radarSiteToLat.find(radarSite);
+    const auto itLon = RadarSites::radarSiteToLon.find(radarSite);
+    if (itLat == RadarSites::radarSiteToLat.end() || itLon == RadarSites::radarSiteToLon.end()) {
+        return {};
+    }
+    return {itLat->second, "-" + itLon->second};
 }
 
 string UtilityLocation::getRadarSiteX(const string& radarSite) {
-    return RadarSites::radarSiteToLat.at(radarSite);
+    const auto it = RadarSites::radarSiteToLat.find(radarSite);
+    return (it != RadarSites::radarSiteToLat.end()) ? it->second : "0.0";
 }
 
 string UtilityLocation::getRadarSiteY(const string& radarSite) {
-    return RadarSites::radarSiteToLon.at(radarSite);
+    const auto it = RadarSites::radarSiteToLon.find(radarSite);
+    return (it != RadarSites::radarSiteToLon.end()) ? it->second : "0.0";
 }
 
 LatLon UtilityLocation::getWfoSiteLatLon(const string& wfo) {

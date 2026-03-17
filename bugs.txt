@@ -218,19 +218,86 @@ FIX:
   +    }
 
 
+BUG #5 — RadarSites map incomplete: getNearestRadarSites crashes on missing sites
+GitHub Issue: (pending)
+Fixed in commit: (pending)
+File: src/settings/UtilityLocation.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  App crashes when typing a city name (>2 chars) in Settings > Add Location.
+  GDB backtrace:
+    #0  ucrtbase!abort
+    #6  std::unordered_map::at (key="LIX") → std::out_of_range
+    #8  UtilityLocation::getRadarSiteLatLon (radarSite="LIX")
+    #9  UtilityLocation::getSiteLocation (site="LIX")
+    #10 UtilityLocation::getNearestRadarSites
+    #11 LocationEditBox::lookupSearchTerm
+
+ROOT CAUSE:
+  GlobalArrays::nexradRadars contains 278 radar site IDs but
+  RadarSites::radarSiteToLat/radarSiteToLon only have data for 160 of them.
+  54 sites (including LIX, FGZ, LOX, MTR, KEY, SJU, GUM, HFO, etc.) are
+  present in nexradRadars but absent from the RadarSites maps.
+
+  getNearestRadarSites() called RadarSites::radarSiteToLat.at(site) which
+  throws std::out_of_range for any missing key.  The C++ runtime caught the
+  unhandled exception and called abort().
+
+  Same issue existed in getNearestOffice(), getRadarSiteLatLon(),
+  getRadarSiteName(), getRadarSiteX(), getRadarSiteY().
+
+FIX (src/settings/UtilityLocation.cpp):
+  - getNearestRadarSites(): skip sites not in RadarSites::radarSiteToLat
+    (guard with .find() before calling getSiteLocation).
+  - Guard result slice: use std::min(count, available) to avoid OOB if
+    fewer than `count` known sites exist.
+  - getNearestOffice() (RADAR branch): same .find() skip guard.
+  - getRadarSiteLatLon(): use .find() instead of .at(); return LatLon{}
+    (0,0) if key missing.
+  - getRadarSiteName(): use .find(); return raw site ID if missing.
+  - getRadarSiteX() / getRadarSiteY(): use .find(); return "0.0" if missing.
+
+DIFF:
+  --- src/settings/UtilityLocation.cpp  getNearestRadarSites()
+  +    for (const auto& radar : GlobalArrays::nexradRadars) {
+  +        const auto labels = WString::split(radar, ":");
+  +        if (RadarSites::radarSiteToLat.find(labels[0]) == RadarSites::radarSiteToLat.end())
+  +            continue;
+  +        const auto siteLatLon = getSiteLocation(labels[0], OfficeTypeEnum::RadarSite);
+  +        radarSites.emplace_back(labels[0], siteLatLon, latLon.dist(siteLatLon));
+  +    }
+  +    const auto available = static_cast<int>(radarSites.size());
+  +    return {radarSites.begin(), radarSites.begin() + std::min(count, available)};
+
+  --- getRadarSiteLatLon()
+  -    return {RadarSites::radarSiteToLat.at(radarSite), "-" + RadarSites::radarSiteToLon.at(radarSite)};
+  +    const auto itLat = RadarSites::radarSiteToLat.find(radarSite);
+  +    const auto itLon = RadarSites::radarSiteToLon.find(radarSite);
+  +    if (itLat == RadarSites::radarSiteToLat.end() || itLon == RadarSites::radarSiteToLon.end())
+  +        return {};
+  +    return {itLat->second, "-" + itLon->second};
+
+  --- getRadarSiteName() / getRadarSiteX() / getRadarSiteY()
+      Similar .find() guards with safe fallback returns.
+
+
 ================================================================================
 GENERAL PATTERN
 ================================================================================
-All four bugs share a common root cause: WString::split() can return a
-vector with fewer elements than expected (e.g. when splitting an empty
-string or a line that lacks delimiters), and the code accessed indices
-without checking the vector size first.
+All five bugs share common root causes on Windows:
 
-The recurring fix pattern is:
+1. WString::split() returns fewer elements than expected (e.g. empty string
+   or line without delimiters) → always check .size() before indexing.
+
+2. std::unordered_map::at() throws std::out_of_range for missing keys →
+   always use .find() and check the iterator before dereferencing.
+
+The recurring fix pattern:
   1. Store the split result in a named variable.
   2. Check .size() >= N before accessing index N-1.
-  3. For functions that return vectors (getNearestRadarSites etc.),
-     check !result.empty() before accessing result[0].
+  3. For vectors returned by other functions, check !result.empty().
+  4. For map lookups, use .find() and guard the iterator.
 
 Already-guarded examples in the codebase to follow:
   - src/radar/CitiesExtended.cpp  (items.size() > 3 guard)
