@@ -55,9 +55,13 @@ void LocationEditBox::lookupSearchTerm() {
         for (auto& city : cities) {
             if (WString::startsWith(WString::toLower(city), text)) {
                 const auto tokens = WString::split(city, ",");
-                const auto latLon = LatLon{tokens[1], tokens[2]};
-                const auto radar = UtilityLocation::getNearestRadarSites(latLon, 1, false)[0].name;
-                citiesSelected.push_back(city + " Radar: " + radar);
+                if (tokens.size() >= 3) {
+                    const auto latLon = LatLon{tokens[1], tokens[2]};
+                    const auto radarSites = UtilityLocation::getNearestRadarSites(latLon, 1, false);
+                    if (!radarSites.empty()) {
+                        citiesSelected.push_back(city + " Radar: " + radarSites[0].name);
+                    }
+                }
             }
         }
         for (size_t index : range(buttons.size())) {
@@ -65,7 +69,7 @@ void LocationEditBox::lookupSearchTerm() {
                 buttons[index].setText(citiesSelected[index]);
                 buttons[index].setVisible(true);
             }
-            if (index == 0) {
+            if (index == 0 && !citiesSelected.empty()) {
                 populateLabels(index);
             }
         }
@@ -77,12 +81,16 @@ void LocationEditBox::lookupSearchTerm() {
 void LocationEditBox::populateLabels(int index) {
     const auto city = buttons[index].getText();
     const auto tokens = WString::split(city, ",");
-    const auto latLon = LatLon{tokens[1], tokens[2]};
-    const auto radar = UtilityLocation::getNearestRadarSites(latLon, 1, false)[0].name;
-    editName.setText(tokens[0]);
-    editLat.setText(tokens[1]);
-    editLon.setText(tokens[2]);
-    editNexrad.setText(radar);
+    if (tokens.size() >= 3) {
+        const auto latLon = LatLon{tokens[1], tokens[2]};
+        const auto radarSites = UtilityLocation::getNearestRadarSites(latLon, 1, false);
+        editName.setText(tokens[0]);
+        editLat.setText(tokens[1]);
+        editLon.setText(tokens[2]);
+        if (!radarSites.empty()) {
+            editNexrad.setText(radarSites[0].name);
+        }
+    }
 }
 
 void LocationEditBox::blankOutButtons() {
