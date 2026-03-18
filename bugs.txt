@@ -2,8 +2,10 @@
 wxqt Windows Bug Fixes
 ================================================================================
 Build environment: Qt 6.4.2 (mingw_64) + Strawberry Perl MinGW 13.2.0 (UCRT)
-All bugs found and fixed during first Windows build/run session (2026-03-17).
+All bugs found and fixed during first Windows build/run session (2026-03-17/18).
 GitHub issues: https://github.com/rcg4u/wxqt/issues
+
+STATUS: All 7 bugs fixed and verified stable — app ran overnight without crash.
 ================================================================================
 
 
@@ -312,25 +314,98 @@ FIX (src/settings/UtilityLocation.cpp):
   - getWfoSiteLatLon(): use .find(); return LatLon{} if key missing.
   - getSoundingSiteLatLon(): use .find(); return LatLon{} if key missing.
 
+DIFF:
+  --- src/settings/UtilityLocation.cpp  getNearestOffice() WFO branch
+  -    if (officeType == "WFO") {
+  -        auto latLon = getWfoSiteLatLon(labelArr[0]);
+  +    if (officeType == "WFO") {
+  +        if (WfoSites::wfoSiteToLat.find(labelArr[0]) == WfoSites::wfoSiteToLat.end())
+  +            continue;
+  +        auto latLon = getWfoSiteLatLon(labelArr[0]);
+
+  --- getWfoSiteLatLon()
+  -    return {WfoSites::wfoSiteToLat.at(wfo), WfoSites::wfoSiteToLon.at(wfo)};
+  +    const auto itLat = WfoSites::wfoSiteToLat.find(wfo);
+  +    const auto itLon = WfoSites::wfoSiteToLon.find(wfo);
+  +    if (itLat == WfoSites::wfoSiteToLat.end() || itLon == WfoSites::wfoSiteToLon.end())
+  +        return {};
+  +    return {itLat->second, itLon->second};
+
+  --- getSoundingSiteLatLon()
+  -    return {SoundingSites::soundingSiteToLat.at(wfo), "-" + SoundingSites::soundingSiteToLon.at(wfo)};
+  +    const auto itLat = SoundingSites::soundingSiteToLat.find(wfo);
+  +    const auto itLon = SoundingSites::soundingSiteToLon.find(wfo);
+  +    if (itLat == SoundingSites::soundingSiteToLat.end() || itLon == SoundingSites::soundingSiteToLon.end())
+  +        return {};
+  +    return {itLat->second, "-" + itLon->second};
+
+
+--------------------------------------------------------------------------------
+BUG #7 — Main window opens full screen on startup
+GitHub Issue: N/A (UI behaviour, not a crash)
+Fixed in commit: d2ad837
+File: src/ui/MainWindow.cpp
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  On Windows the main window fills the entire screen on launch, obscuring
+  the taskbar and other windows.
+
+ROOT CAUSE:
+  Window::Window() (base class constructor) calls maximize() unconditionally.
+  maximize() reads the full screen dimensions via UtilityUI::getScreenBounds()
+  and calls resize(screenW, screenH) + move(0, 0), making every Window
+  subclass open at full screen size.
+
+FIX:
+  Add resize(1280, 800) at the end of MainWindow's constructor, after all
+  widgets are built. This overrides the base-class maximize() result with
+  a sensible default size without changing the behaviour of other windows
+  (Settings, Radar viewer, etc.) that may legitimately want to fill the screen.
+
+  --- src/ui/MainWindow.cpp  (end of constructor, before reload())
+  +    resize(1280, 800);
+       reload();
+   }
+
 
 ================================================================================
 GENERAL PATTERN
 ================================================================================
-All six bugs share common root causes on Windows:
+All 7 issues share a small set of root causes on Windows:
 
-1. WString::split() returns fewer elements than expected (e.g. empty string
-   or line without delimiters) → always check .size() before indexing.
+1. WString::split() returns fewer elements than expected when splitting an
+   empty string or a line that lacks delimiters.
+   → Always check .size() >= N before accessing index N-1.
 
-2. std::unordered_map::at() throws std::out_of_range for missing keys →
-   always use .find() and check the iterator before dereferencing.
+2. std::unordered_map::at() throws std::out_of_range for any key not in
+   the map. Several static lookup maps (RadarSites, WfoSites, SoundingSites)
+   are incomplete — they cover only a subset of the IDs in GlobalArrays.
+   → Always use .find() and check the iterator before dereferencing.
+
+3. Qt deleteLater() schedules widget destruction asynchronously. Widgets
+   removed via removeChildren() must not be re-added or accessed within
+   the same event-loop cycle.
+   → Detach widgets you want to keep BEFORE calling removeChildren().
+
+4. Default window sizing fills the entire screen on Windows because
+   Window::maximize() uses getScreenBounds().
+   → Override with an explicit resize() in the MainWindow constructor.
 
 The recurring fix pattern:
-  1. Store the split result in a named variable.
-  2. Check .size() >= N before accessing index N-1.
-  3. For vectors returned by other functions, check !result.empty().
-  4. For map lookups, use .find() and guard the iterator.
+  1. Store split results in a named variable; check .size() before indexing.
+  2. Use .find() for map lookups; guard the iterator or provide a fallback.
+  3. Check !vector.empty() before accessing [0].
+  4. Detach retained children before clearing a layout.
 
 Already-guarded examples in the codebase to follow:
   - src/radar/CitiesExtended.cpp  (items.size() > 3 guard)
   - src/radar/Metar.cpp line ~187 (items.size() > 3 guard for metarSites)
+
+Commit history:
+  bc93d9e — fix: prevent crashes on startup (Bugs #1 #2 #3)
+  ccb4213 — fix: guard OOB access in LocationEditBox (Bug #4)
+  7033695 — fix: guard RadarSites map lookups (Bug #5)
+  53aa309 — fix: guard WfoSites/SoundingSites map lookups (Bug #6)
+  d2ad837 — feat: open main window at 1280x800 instead of full screen (Bug #7)
 ================================================================================
