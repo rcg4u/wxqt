@@ -114,6 +114,7 @@ MainWindow::MainWindow(QWidget * parent)
     shortcutWpcText.connect([this] { objectToolbar.launchNationalText(); });
     shortcutRtma.connect([this] { objectToolbar.launchRtma(); });
 
+    resize(1280, 800);
     reload();
 }
 
