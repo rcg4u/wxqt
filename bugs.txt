@@ -283,8 +283,8 @@ DIFF:
 
 
 BUG #6 — WfoSites map incomplete: getNearestOffice crashes when saving location
-GitHub Issue: (pending)
-Fixed in commit: (pending)
+GitHub Issue: https://github.com/rcg4u/wxqt/issues/6
+Fixed in commit: 53aa309
 File: src/settings/UtilityLocation.cpp
 --------------------------------------------------------------------------------
 
